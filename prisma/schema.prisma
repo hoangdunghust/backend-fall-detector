@@ -1,0 +1,135 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // ứng dụng dùng (Supabase: transaction pooler, cổng 6543 + ?pgbouncer=true)
+  directUrl = env("DIRECT_URL")   // Prisma CLI (migrate/db push) dùng: kết nối trực tiếp hoặc session pooler, cổng 5432
+}
+
+enum IncidentType {
+  FALL
+  HELP_REQUEST
+}
+
+enum IncidentStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+  CANCELLED
+}
+
+enum SyncStatus {
+  PENDING
+  SYNCED
+  FAILED
+}
+
+enum CommandAction {
+  REBOOT
+  REQUEST_LOCATION
+}
+
+enum CommandStatus {
+  PENDING
+  OK
+  EXPIRED
+}
+
+// Một hàng duy nhất (id = 1): trạng thái mới nhất của ESP
+model DeviceState {
+  id          Int       @id @default(1)
+  online      Boolean   @default(false)
+  firmware    String?
+  lastSeenAt  DateTime?
+  bootedAt    DateTime?  // ước tính thời điểm khởi động (nhận từ uptime_s)
+  uptimeS     Int?
+  signal      Int?       // CSQ 0-31, 99 = không rõ
+  imuOk       Boolean?
+  gpsFix      Boolean?
+  contactsCnt Int?       // số liên hệ thiết bị đang giữ
+  heap        Int?
+  updatedAt   DateTime  @updatedAt
+}
+
+model EmergencyContact {
+  id        String     @id @default(cuid())
+  phone     String     @unique
+  name      String?
+  position  Int        @default(0)
+  sync      SyncStatus @default(PENDING)
+  updatedAt DateTime   @updatedAt
+}
+
+model Incident {
+  id          String         @id @default(cuid())
+  type        IncidentType
+  status      IncidentStatus @default(OPEN)
+  confidence  Float?
+  lat         Float?
+  lon         Float?
+  gpsValid    Boolean        @default(false)
+  gpsAgeS     Int?
+  deviceTime  DateTime?      // giờ thiết bị (null nếu chưa có giờ GPS)
+  receivedAt  DateTime       @default(now())
+  cancelledAt DateTime?
+  ackedAt     DateTime?
+  resolvedAt  DateTime?
+  eventId     String?        @unique // dành cho firmware có event_id (chống trùng chính xác)
+  sms         SmsDelivery[]
+
+  @@index([receivedAt])
+  @@index([status])
+}
+
+model SmsDelivery {
+  id         String    @id @default(cuid())
+  incidentId String?
+  phone      String
+  success    Boolean
+  deviceTime DateTime?
+  at         DateTime  @default(now())
+  incident   Incident? @relation(fields: [incidentId], references: [id], onDelete: SetNull)
+
+  @@index([incidentId])
+}
+
+model Location {
+  id     String   @id @default(cuid())
+  lat    Float
+  lon    Float
+  valid  Boolean  // fix còn mới tại thời điểm thiết bị gửi
+  ageS   Int?     // tuổi fix lúc thiết bị gửi
+  source String   // loại sự kiện: FALL, HELP_REQUEST, LOCATION_UPDATE...
+  at     DateTime @default(now())
+
+  @@index([at])
+}
+
+model CommandLog {
+  id         String        @id @default(cuid())
+  action     CommandAction
+  status     CommandStatus @default(PENDING)
+  expiresAt  DateTime
+  createdAt  DateTime      @default(now())
+  resolvedAt DateTime?
+
+  @@index([status, expiresAt])
+}
+
+model DeviceHealthLog {
+  id     String   @id @default(cuid())
+  signal Int?
+  imuOk  Boolean?
+  gpsFix Boolean?
+  heap   Int?
+  at     DateTime @default(now())
+
+  @@index([at])
+}
+
+model PushToken {
+  token     String   @id
+  createdAt DateTime @default(now())
+}

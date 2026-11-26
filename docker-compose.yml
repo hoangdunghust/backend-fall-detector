@@ -1,0 +1,45 @@
+# DB mặc định là Supabase (khai báo trong .env), nên compose KHÔNG chạy Postgres trừ khi bạn bật profile.
+#
+#   Dùng Supabase:      docker compose up -d --build
+#   Dùng Postgres cục bộ: docker compose --profile local-db up -d --build
+#                         (trong .env, host của DATABASE_URL/DIRECT_URL là "db" khi api chạy trong compose,
+#                          hoặc "localhost" khi chạy `npm run start:dev` trên máy)
+services:
+  db:
+    image: postgres:16-alpine
+    profiles: ["local-db"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fall
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-fall_dev_password}
+      POSTGRES_DB: fall
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fall -d fall"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Broker cục bộ để thử (không có xác thực, KHÔNG dùng cho production):
+  #   docker compose --profile local-broker up -d mosquitto
+  mosquitto:
+    image: eclipse-mosquitto:2
+    profiles: ["local-broker"]
+    restart: unless-stopped
+    volumes:
+      - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "127.0.0.1:1883:1883"
+
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:
